@@ -1,0 +1,442 @@
+[
+  {
+    "id": "t01",
+    "level": "easy",
+    "domain": "Cluster Architecture, Installation & Configuration",
+    "title": "Create a new namespace with a ResourceQuota",
+    "prompt": "Create namespace 'taskns1'. In it, create a ResourceQuota named 'compute-quota' limiting to max 4 pods, requests.cpu=1, requests.memory=1Gi.",
+    "verify": "kubectl get ns taskns1 >/dev/null 2>&1 && kubectl get resourcequota compute-quota -n taskns1 -o jsonpath='{.spec.hard.pods}' | grep -q '^4$'"
+  },
+  {
+    "id": "t02",
+    "level": "hard",
+    "domain": "Cluster Architecture, Installation & Configuration",
+    "title": "etcd snapshot backup",
+    "prompt": "Take an etcd snapshot from cka-practice-control-plane and save it to /tmp/etcd-backup.db on that node, using the cluster's etcd certs.",
+    "verify": "docker exec cka-practice-control-plane test -f /tmp/etcd-backup.db"
+  },
+  {
+    "id": "t03",
+    "level": "medium",
+    "domain": "Cluster Architecture, Installation & Configuration",
+    "title": "Static pod on a node",
+    "prompt": "Create a static pod named 'static-web' running nginx on cka-practice-worker via the kubelet manifest path (not kubectl apply). Confirm it shows up as '<name>-cka-practice-worker' in 'kubectl get pods'.",
+    "verify": "kubectl get pod static-web-cka-practice-worker -n default >/dev/null 2>&1"
+  },
+  {
+    "id": "t04",
+    "level": "medium",
+    "domain": "Workloads & Scheduling",
+    "title": "Rolling update + rollback",
+    "prompt": "Create namespace 'taskns4'. Deploy nginx:1.25 as Deployment 'rollme' (2 replicas). Update its image to a bad tag to trigger a failed rollout, then roll back to the previous working revision.",
+    "verify": "kubectl get deployment rollme -n taskns4 -o jsonpath='{.spec.template.spec.containers[0].image}' | grep -q 'nginx:1.25' && kubectl get deployment rollme -n taskns4 -o jsonpath='{.status.readyReplicas}' | grep -q '^2$'"
+  },
+  {
+    "id": "t05",
+    "level": "medium",
+    "domain": "Workloads & Scheduling",
+    "title": "Multi-container pod with shared volume",
+    "prompt": "Create namespace 'taskns5'. Create a Pod 'sidecar-pod' with two containers sharing an emptyDir volume mounted at /data in both: one container (busybox) writes 'hello' to /data/out.txt every 5s, the other (busybox) tails that file.",
+    "verify": "kubectl get pod sidecar-pod -n taskns5 -o jsonpath='{.spec.containers[*].name}' | wc -w | grep -q '^2$'"
+  },
+  {
+    "id": "t06",
+    "level": "easy",
+    "domain": "Workloads & Scheduling",
+    "title": "CronJob",
+    "prompt": "Create namespace 'taskns6'. Create a CronJob 'hello-cron' running every minute that echoes 'hello cka'.",
+    "verify": "kubectl get cronjob hello-cron -n taskns6 >/dev/null 2>&1"
+  },
+  {
+    "id": "t07",
+    "level": "medium",
+    "domain": "Services & Networking",
+    "title": "ClusterIP + NodePort exposure",
+    "prompt": "Create namespace 'taskns7'. Deploy nginx (2 replicas, Deployment 'websvc'). Expose it as a ClusterIP Service 'websvc-cip' on port 80, and separately as a NodePort Service 'websvc-np' on port 30080.",
+    "verify": "kubectl get svc websvc-cip -n taskns7 -o jsonpath='{.spec.type}' | grep -q ClusterIP && kubectl get svc websvc-np -n taskns7 -o jsonpath='{.spec.ports[0].nodePort}' | grep -q 30080"
+  },
+  {
+    "id": "t08",
+    "level": "hard",
+    "domain": "Services & Networking",
+    "title": "NetworkPolicy allow-only-from-namespace",
+    "prompt": "Create namespaces 'taskns8-a' and 'taskns8-b', each with an nginx pod labeled app=web. In taskns8-a, write a NetworkPolicy 'allow-from-b' that only allows ingress to app=web pods from pods in taskns8-b (any label), denying all else.",
+    "verify": "kubectl get networkpolicy allow-from-b -n taskns8-a >/dev/null 2>&1"
+  },
+  {
+    "id": "t09",
+    "level": "medium",
+    "domain": "Services & Networking",
+    "title": "Ingress resource",
+    "prompt": "Create namespace 'taskns9'. Deploy nginx as Deployment 'webapp' + ClusterIP Service 'webapp-svc' port 80. Create an Ingress 'webapp-ing' routing host 'cka.practice.local' path '/' to that service. (An ingress controller isn't required to be installed - just write a correct spec.)",
+    "verify": "kubectl get ingress webapp-ing -n taskns9 >/dev/null 2>&1"
+  },
+  {
+    "id": "t10",
+    "level": "medium",
+    "domain": "Storage",
+    "title": "PV + PVC + Pod (hostPath, manual binding)",
+    "prompt": "Create namespace 'taskns10'. Create a PersistentVolume 'manual-pv' (1Gi, hostPath /mnt/data, storageClassName 'manual'), a PVC 'manual-pvc' requesting 1Gi with the same storageClassName, and a Pod mounting it at /usr/share/nginx/html. Confirm the PVC binds to the PV.",
+    "verify": "kubectl get pvc manual-pvc -n taskns10 -o jsonpath='{.status.phase}' | grep -q Bound"
+  },
+  {
+    "id": "t11",
+    "level": "medium",
+    "domain": "Storage",
+    "title": "Dynamic provisioning with default StorageClass",
+    "prompt": "Create namespace 'taskns11'. Create a PVC 'dyn-pvc' requesting 500Mi with no storageClassName specified (use cluster default 'standard'). Mount it in a Pod and confirm it auto-provisions and binds.",
+    "verify": "kubectl get pvc dyn-pvc -n taskns11 -o jsonpath='{.status.phase}' | grep -q Bound"
+  },
+  {
+    "id": "t12",
+    "level": "medium",
+    "domain": "Workloads & Scheduling",
+    "title": "Node affinity + tolerations",
+    "prompt": "Label cka-practice-worker with 'disktype=ssd'. Create namespace 'taskns12'. Create a Deployment 'affine' (nginx, 1 replica) with a nodeAffinity requiring disktype=ssd, and confirm it lands on cka-practice-worker.",
+    "verify": "kubectl get pod -n taskns12 -l app=affine -o jsonpath='{.items[0].spec.nodeName}' | grep -q cka-practice-worker"
+  },
+  {
+    "id": "t13",
+    "level": "medium",
+    "domain": "Workloads & Scheduling",
+    "title": "DaemonSet",
+    "prompt": "Create namespace 'taskns13'. Create a DaemonSet 'nodelogger' running busybox (command: sleep 3600) that runs one pod on every node, including control-plane (add the needed toleration).",
+    "verify": "kubectl get daemonset nodelogger -n taskns13 -o jsonpath='{.status.desiredNumberScheduled}' | grep -q '^3$'"
+  },
+  {
+    "id": "t14",
+    "level": "medium",
+    "domain": "Workloads & Scheduling",
+    "title": "initContainer gate",
+    "prompt": "Create namespace 'taskns14'. Create a Pod 'gated-pod' (nginx) with an initContainer (busybox) that runs 'sleep 5' before the main container starts. Confirm the pod reaches Running with both containers accounted for.",
+    "verify": "kubectl get pod gated-pod -n taskns14 -o jsonpath='{.status.initContainerStatuses[0].state.terminated.reason}' | grep -q Completed"
+  },
+  {
+    "id": "t15",
+    "level": "medium",
+    "domain": "Workloads & Scheduling",
+    "title": "HorizontalPodAutoscaler",
+    "prompt": "Create namespace 'taskns15'. Deploy nginx as Deployment 'hpaapp' (1 replica) with cpu requests set (100m). Create an HPA 'hpaapp-hpa' targeting it, min 1 max 5 replicas, target CPU 50%. (metrics-server isn't installed here, so it won't actually scale - just create a correct spec.)",
+    "verify": "kubectl get hpa hpaapp-hpa -n taskns15 -o jsonpath='{.spec.maxReplicas}' | grep -q '^5$'"
+  },
+  {
+    "id": "t16",
+    "level": "medium",
+    "domain": "Cluster Architecture, Installation & Configuration",
+    "title": "Secret from literals, mounted as volume",
+    "prompt": "Create namespace 'taskns16'. Create a Secret 'app-creds' with keys username=admin, password=s3cr3t via kubectl (not a raw manifest with stringData). Mount it as a volume at /etc/creds (read-only) in a Pod 'creds-pod' (nginx).",
+    "verify": "kubectl get secret app-creds -n taskns16 >/dev/null 2>&1 && kubectl get pod creds-pod -n taskns16 -o jsonpath='{.spec.volumes[?(@.secret.secretName==\"app-creds\")].name}' | grep -q ."
+  },
+  {
+    "id": "t17",
+    "level": "hard",
+    "domain": "Cluster Architecture, Installation & Configuration",
+    "title": "ClusterRole + ClusterRoleBinding",
+    "prompt": "Create ServiceAccount 'cluster-watcher' in namespace 'default'. Create a ClusterRole 'node-reader' allowing get/list/watch on nodes (cluster-scoped resource). Bind it to the ServiceAccount cluster-wide with a ClusterRoleBinding 'watcher-binding'.",
+    "verify": "kubectl auth can-i list nodes --as=system:serviceaccount:default:cluster-watcher | grep -q '^yes$'"
+  },
+  {
+    "id": "t18",
+    "level": "easy",
+    "domain": "Cluster Architecture, Installation & Configuration",
+    "title": "Cordon, drain, uncordon",
+    "prompt": "Cordon cka-practice-worker2 so no new pods schedule there. Confirm it shows SchedulingDisabled. Then uncordon it again and confirm it's schedulable.",
+    "verify": "kubectl get node cka-practice-worker2 -o jsonpath='{.spec.unschedulable}' | grep -qv true"
+  },
+  {
+    "id": "t19",
+    "level": "easy",
+    "domain": "Workloads & Scheduling",
+    "title": "PriorityClass",
+    "prompt": "Create a PriorityClass 'high-priority' with value 1000000, not marked as global default. Create namespace 'taskns19'. Create a Pod 'priority-pod' (nginx) using that PriorityClass.",
+    "verify": "kubectl get pod priority-pod -n taskns19 -o jsonpath='{.spec.priorityClassName}' | grep -q high-priority"
+  },
+  {
+    "id": "t20",
+    "level": "easy",
+    "domain": "Services & Networking",
+    "title": "ExternalName Service",
+    "prompt": "Create namespace 'taskns20'. Create a Service 'ext-svc' of type ExternalName pointing to 'example.com'.",
+    "verify": "kubectl get svc ext-svc -n taskns20 -o jsonpath='{.spec.externalName}' | grep -q example.com"
+  },
+  {
+    "id": "t21",
+    "level": "hard",
+    "domain": "Cluster Architecture, Installation & Configuration",
+    "title": "etcd restore from snapshot",
+    "prompt": "Namespace 'before-snapshot' already exists. Take an etcd snapshot to /tmp/etcd-restore-test.db on cka-practice-control-plane. Then create namespace 'restore-marker'. Restore etcd from the snapshot into a new data dir (/var/lib/etcd-restored), point etcd's static pod manifest at it, and confirm: 'before-snapshot' still exists (it was there at snapshot time) but 'restore-marker' is gone (it was created after the snapshot).",
+    "verify": "kubectl get namespace before-snapshot >/dev/null 2>&1 && ! kubectl get namespace restore-marker >/dev/null 2>&1 && docker exec cka-practice-control-plane grep -q etcd-restored /etc/kubernetes/manifests/etcd.yaml"
+  },
+  {
+    "id": "t22",
+    "level": "easy",
+    "domain": "Cluster Architecture, Installation & Configuration",
+    "title": "Certificate expiration check",
+    "prompt": "Using kubeadm on cka-practice-control-plane, check the expiration dates of all cluster certificates and save the output to /tmp/cert-expiry.txt on that node.",
+    "verify": "docker exec cka-practice-control-plane test -f /tmp/cert-expiry.txt && docker exec cka-practice-control-plane grep -q CERTIFICATE /tmp/cert-expiry.txt"
+  },
+  {
+    "id": "t23",
+    "level": "medium",
+    "domain": "Services & Networking",
+    "title": "Expose an existing Deployment (named port)",
+    "prompt": "A Deployment 'web-server' already exists in namespace 'taskns23' (2 replicas, named container port 'http' = 80). Without editing the Deployment, create a NodePort Service 'web-server-svc' that references the named port 'http' and exposes it on nodePort 30081.",
+    "verify": "kubectl get svc web-server-svc -n taskns23 -o jsonpath='{.spec.ports[0].nodePort}' | grep -q 30081 && kubectl get endpoints web-server-svc -n taskns23 -o jsonpath='{.subsets[0].addresses[*].ip}' | grep -q ."
+  },
+  {
+    "id": "t24",
+    "level": "hard",
+    "domain": "Workloads & Scheduling",
+    "title": "Add a sidecar to an existing Deployment",
+    "prompt": "A Deployment 'log-app' already exists in namespace 'taskns24', writing lines to /var/log/app/app.log inside an emptyDir volume named 'logs'. Edit the Deployment to add a sidecar container 'log-sidecar' (busybox) that mounts the same 'logs' volume and tails app.log to stdout ('tail -f /var/log/app/app.log').",
+    "verify": "kubectl get deployment log-app -n taskns24 -o jsonpath='{.spec.template.spec.containers[*].name}' | grep -q log-sidecar && kubectl get pods -n taskns24 -l app=log-app -o jsonpath='{.items[0].status.containerStatuses[?(@.name==\"log-sidecar\")].ready}' | grep -q true"
+  },
+  {
+    "id": "t25",
+    "level": "medium",
+    "domain": "Cluster Architecture, Installation & Configuration",
+    "title": "Connect an existing Deployment to an existing ConfigMap",
+    "prompt": "Namespace 'taskns25' already has a Deployment 'bareapp' and a ConfigMap 'app-config' (key 'greeting'). Edit the Deployment to inject that ConfigMap's 'greeting' key as env var GREETING in the container, without recreating the ConfigMap.",
+    "verify": "kubectl get deployment bareapp -n taskns25 -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name==\"GREETING\")].valueFrom.configMapKeyRef.name}' | grep -q app-config"
+  },
+  {
+    "id": "t26",
+    "level": "hard",
+    "domain": "Services & Networking",
+    "title": "Wire two existing Deployments together via a Service + NetworkPolicy",
+    "prompt": "Namespace 'taskns26' already has Deployments 'frontend' (nginx) and 'backend' (listens on 8080). Create a ClusterIP Service 'backend-svc' exposing backend port 80 -> targetPort 8080. Then write a NetworkPolicy 'allow-frontend-to-backend' on the backend pods that allows ingress only from pods labeled app=frontend, on port 8080.",
+    "verify": "kubectl get svc backend-svc -n taskns26 -o jsonpath='{.spec.ports[0].targetPort}' | grep -q 8080 && kubectl get networkpolicy allow-frontend-to-backend -n taskns26 >/dev/null 2>&1"
+  },
+  {
+    "id": "t27",
+    "level": "easy",
+    "domain": "Storage",
+    "title": "Create a StorageClass",
+    "prompt": "Create a StorageClass named 'slow-tier' using provisioner 'rancher.io/local-path', reclaimPolicy Delete, volumeBindingMode WaitForFirstConsumer.",
+    "verify": "kubectl get storageclass slow-tier -o jsonpath='{.volumeBindingMode}' | grep -q WaitForFirstConsumer"
+  },
+  {
+    "id": "t28",
+    "level": "medium",
+    "domain": "Storage",
+    "title": "Expand a PVC",
+    "prompt": "Create namespace 'taskns28'. The default 'standard' StorageClass has allowVolumeExpansion=false, so first create a StorageClass 'growable' (provisioner rancher.io/local-path, volumeBindingMode Immediate, allowVolumeExpansion=true). Then create PVC 'grow-pvc' on that class requesting 100Mi, and expand it to 300Mi.",
+    "verify": "kubectl get storageclass growable -o jsonpath='{.allowVolumeExpansion}' | grep -q true && kubectl get pvc grow-pvc -n taskns28 -o jsonpath='{.spec.resources.requests.storage}' | grep -q '^300Mi$'"
+  },
+  {
+    "id": "t29",
+    "level": "medium",
+    "domain": "Storage",
+    "title": "PV with Retain reclaim policy",
+    "prompt": "Create a PersistentVolume 'retain-pv': 1Gi, ReadWriteOnce, hostPath /mnt/retain, storageClassName 'retain-sc', persistentVolumeReclaimPolicy Retain.",
+    "verify": "kubectl get pv retain-pv -o jsonpath='{.spec.persistentVolumeReclaimPolicy}' | grep -q Retain"
+  },
+  {
+    "id": "t30",
+    "level": "medium",
+    "domain": "Storage",
+    "title": "ConfigMap as a mounted volume",
+    "prompt": "Create namespace 'taskns30'. Create ConfigMap 'web-content' with key index.html containing '<h1>hello</h1>'. Run a Pod 'web-content-pod' (nginx) mounting that ConfigMap at /usr/share/nginx/html so curl of the pod returns that HTML.",
+    "verify": "kubectl exec -n taskns30 web-content-pod -- cat /usr/share/nginx/html/index.html 2>/dev/null | grep -q hello"
+  },
+  {
+    "id": "t31",
+    "level": "hard",
+    "domain": "Storage",
+    "title": "Two pods sharing one PVC",
+    "prompt": "Create namespace 'taskns31'. Create PVC 'shared-data' (200Mi, storageClassName 'standard'). Run two pods 'writer' and 'reader' on the SAME node, both mounting it at /shared. 'writer' must write /shared/msg.txt containing 'from-writer'; 'reader' must be able to read it.",
+    "verify": "kubectl exec -n taskns31 reader -- cat /shared/msg.txt 2>/dev/null | grep -q from-writer"
+  },
+  {
+    "id": "t32",
+    "level": "easy",
+    "domain": "Services & Networking",
+    "title": "Expose a Deployment with kubectl expose",
+    "prompt": "Create namespace 'taskns32' with Deployment 'quickweb' (nginx, 2 replicas). Expose it as a ClusterIP Service named 'quickweb' on port 80 using a single kubectl expose command.",
+    "verify": "kubectl get svc quickweb -n taskns32 -o jsonpath='{.spec.ports[0].port}' | grep -q '^80$'"
+  },
+  {
+    "id": "t33",
+    "level": "medium",
+    "domain": "Services & Networking",
+    "title": "Multi-port Service",
+    "prompt": "Create namespace 'taskns33'. Deploy nginx as 'multiport' exposing containerPorts 80 and 8080. Create Service 'multiport-svc' with two NAMED ports: 'web' -> 80 and 'admin' -> 8080.",
+    "verify": "kubectl get svc multiport-svc -n taskns33 -o jsonpath='{.spec.ports[*].name}' | grep -q web && kubectl get svc multiport-svc -n taskns33 -o jsonpath='{.spec.ports[*].name}' | grep -q admin"
+  },
+  {
+    "id": "t34",
+    "level": "medium",
+    "domain": "Services & Networking",
+    "title": "NetworkPolicy allow by port only",
+    "prompt": "Create namespace 'taskns34' with an nginx Deployment 'guarded' labeled app=guarded. Write NetworkPolicy 'port-only' that allows ingress to app=guarded pods on TCP 80 from ANY pod in the same namespace, and denies everything else.",
+    "verify": "kubectl get networkpolicy port-only -n taskns34 -o jsonpath='{.spec.ingress[0].ports[0].port}' | grep -q '^80$'"
+  },
+  {
+    "id": "t35",
+    "level": "hard",
+    "domain": "Services & Networking",
+    "title": "Ingress with two path rules",
+    "prompt": "Create namespace 'taskns35' with Deployments 'appa' and 'appb' (nginx) plus ClusterIP Services 'appa-svc'/'appb-svc' on port 80. Create Ingress 'split-ing' for host 'split.practice.local' routing /a to appa-svc and /b to appb-svc (pathType Prefix).",
+    "verify": "[ \"$(kubectl get ingress split-ing -n taskns35 -o jsonpath='{.spec.rules[0].http.paths[*].path}' 2>/dev/null | wc -w)\" = \"2\" ]"
+  },
+  {
+    "id": "t36",
+    "level": "hard",
+    "domain": "Services & Networking",
+    "title": "Verify DNS resolution between namespaces",
+    "prompt": "Create namespaces 'taskns36-a' and 'taskns36-b'. In -a, run nginx Deployment 'crossapp' plus ClusterIP Service 'crossapp-svc' (port 80). In -b, run a long-lived busybox pod named 'crossclient' that can resolve and reach crossapp-svc.taskns36-a.svc.cluster.local.",
+    "verify": "kubectl exec -n taskns36-b crossclient -- wget -qO- --timeout=5 crossapp-svc.taskns36-a.svc.cluster.local >/dev/null 2>&1"
+  },
+  {
+    "id": "t37",
+    "level": "easy",
+    "domain": "Cluster Architecture, Installation & Configuration",
+    "title": "Label and annotate a node",
+    "prompt": "Add label 'workload=batch' and annotation 'owner=practice' to node cka-practice-worker2.",
+    "verify": "kubectl get node cka-practice-worker2 -o jsonpath='{.metadata.labels.workload}' | grep -q batch && kubectl get node cka-practice-worker2 -o jsonpath='{.metadata.annotations.owner}' | grep -q practice"
+  },
+  {
+    "id": "t38",
+    "level": "medium",
+    "domain": "Cluster Architecture, Installation & Configuration",
+    "title": "ServiceAccount with a bound Role",
+    "prompt": "Create namespace 'taskns38'. Create ServiceAccount 'deploy-bot'. Create a Role 'deploy-manager' allowing get/list/create/update on deployments (apps API group), bound to that SA via RoleBinding 'deploy-bot-binding'.",
+    "verify": "kubectl auth can-i create deployments --as=system:serviceaccount:taskns38:deploy-bot -n taskns38 2>/dev/null | grep -q '^yes$'"
+  },
+  {
+    "id": "t39",
+    "level": "medium",
+    "domain": "Cluster Architecture, Installation & Configuration",
+    "title": "Read cluster events for triage",
+    "prompt": "Create namespace 'taskns39'. Deliberately run a pod 'badimage-pod' with image 'nginx:doesnotexist'. Then write the namespace's events, sorted by timestamp, to /tmp/taskns39-events.txt on THIS machine.",
+    "verify": "test -f /tmp/taskns39-events.txt && grep -qiE 'fail|err|back-off|pull' /tmp/taskns39-events.txt"
+  },
+  {
+    "id": "t40",
+    "level": "hard",
+    "domain": "Cluster Architecture, Installation & Configuration",
+    "title": "Find top resource-consuming pods without metrics-server",
+    "prompt": "Without metrics-server, list every pod in the cluster together with its CPU and memory REQUESTS, sorted, and save to /tmp/pod-requests.txt on THIS machine. Hint: kubectl get pods -A -o custom-columns or jsonpath.",
+    "verify": "test -f /tmp/pod-requests.txt && [ \"$(wc -l < /tmp/pod-requests.txt)\" -ge 5 ]"
+  },
+  {
+    "id": "t41",
+    "level": "hard",
+    "domain": "Cluster Architecture, Installation & Configuration",
+    "title": "Drain a node safely and bring it back",
+    "prompt": "Create namespace 'taskns41' with Deployment 'movable' (nginx, 2 replicas). Drain cka-practice-worker2 (ignore daemonsets, delete emptydir data) so its pods reschedule elsewhere, then uncordon it. End state: node schedulable again AND all 2 replicas Ready.",
+    "verify": "[ \"$(kubectl get node cka-practice-worker2 -o jsonpath='{.spec.unschedulable}' 2>/dev/null)\" != \"true\" ] && [ \"$(kubectl get deployment movable -n taskns41 -o jsonpath='{.status.readyReplicas}' 2>/dev/null)\" = \"2\" ]"
+  },
+  {
+    "id": "t42",
+    "level": "medium",
+    "domain": "Cluster Architecture, Installation & Configuration",
+    "title": "Inspect kubeadm cluster config",
+    "prompt": "From cka-practice-control-plane, dump the kubeadm ClusterConfiguration held in the kube-system 'kubeadm-config' ConfigMap to /tmp/kubeadm-config.yaml on that node.",
+    "verify": "docker exec cka-practice-control-plane test -f /tmp/kubeadm-config.yaml && docker exec cka-practice-control-plane grep -q 'kubernetesVersion\\|ClusterConfiguration' /tmp/kubeadm-config.yaml"
+  },
+  {
+    "id": "t43",
+    "level": "easy",
+    "domain": "Workloads & Scheduling",
+    "title": "Scale a Deployment",
+    "prompt": "Create namespace 'taskns43' with Deployment 'scaleme' (nginx, 1 replica). Scale it to 4 replicas and confirm all 4 are Ready.",
+    "verify": "[ \"$(kubectl get deployment scaleme -n taskns43 -o jsonpath='{.status.readyReplicas}' 2>/dev/null)\" = \"4\" ]"
+  },
+  {
+    "id": "t44",
+    "level": "medium",
+    "domain": "Workloads & Scheduling",
+    "title": "Job with parallelism and completions",
+    "prompt": "Create namespace 'taskns44'. Create a Job 'parallel-job' (busybox, command: echo done) with completions=6 and parallelism=2. Wait for it to finish successfully.",
+    "verify": "[ \"$(kubectl get job parallel-job -n taskns44 -o jsonpath='{.status.succeeded}' 2>/dev/null)\" = \"6\" ]"
+  },
+  {
+    "id": "t45",
+    "level": "medium",
+    "domain": "Workloads & Scheduling",
+    "title": "Pod with resource requests and limits",
+    "prompt": "Create namespace 'taskns45'. Run Pod 'bounded-pod' (nginx) with requests cpu=100m/memory=128Mi and limits cpu=200m/memory=256Mi. It must reach Running.",
+    "verify": "kubectl get pod bounded-pod -n taskns45 -o jsonpath='{.spec.containers[0].resources.limits.memory}' | grep -q '^256Mi$' && [ \"$(kubectl get pod bounded-pod -n taskns45 -o jsonpath='{.status.phase}')\" = \"Running\" ]"
+  },
+  {
+    "id": "t46",
+    "level": "hard",
+    "domain": "Workloads & Scheduling",
+    "title": "Pod anti-affinity across nodes",
+    "prompt": "Create namespace 'taskns46'. Create Deployment 'spread' (nginx, 2 replicas, label app=spread) with requiredDuringSchedulingIgnoredDuringExecution podAntiAffinity on hostname, so the two replicas must land on DIFFERENT nodes. Both must be Ready.",
+    "verify": "[ \"$(kubectl get pods -n taskns46 -l app=spread -o jsonpath='{.items[*].spec.nodeName}' 2>/dev/null | tr ' ' '\\n' | sort -u | wc -l)\" = \"2\" ] && [ \"$(kubectl get deployment spread -n taskns46 -o jsonpath='{.status.readyReplicas}')\" = \"2\" ]"
+  },
+  {
+    "id": "t47",
+    "level": "hard",
+    "domain": "Workloads & Scheduling",
+    "title": "Native sidecar (restartPolicy Always initContainer)",
+    "prompt": "Create namespace 'taskns47'. Create Deployment 'native-sidecar' (nginx main container) with a NATIVE sidecar: an initContainer named 'logger' (busybox, command 'sleep 3600') that has restartPolicy: Always - the Kubernetes 1.29+ sidecar pattern, GA in 1.35. Deployment must become Ready.",
+    "verify": "kubectl get deployment native-sidecar -n taskns47 -o jsonpath='{.spec.template.spec.initContainers[?(@.name==\"logger\")].restartPolicy}' | grep -q Always && [ \"$(kubectl get deployment native-sidecar -n taskns47 -o jsonpath='{.status.readyReplicas}')\" = \"1\" ]"
+  },
+  {
+    "id": "t48",
+    "level": "easy",
+    "domain": "Services & Networking",
+    "title": "GatewayClass and Gateway",
+    "prompt": "Gateway API v1 CRDs are installed. Create namespace 'taskns48'. Create a GatewayClass named 'practice-gc' with controllerName 'example.net/gateway-controller'. Then in taskns48 create a Gateway 'web-gw' using that GatewayClass with a single HTTP listener named 'http' on port 80, allowing routes from the Same namespace.",
+    "verify": "kubectl get gatewayclass practice-gc -o jsonpath='{.spec.controllerName}' | grep -q 'example.net/gateway-controller' && kubectl get gateway web-gw -n taskns48 -o jsonpath='{.spec.listeners[0].port}' | grep -q '^80$'"
+  },
+  {
+    "id": "t49",
+    "level": "medium",
+    "domain": "Services & Networking",
+    "title": "HTTPRoute attached to a Gateway",
+    "prompt": "Namespace 'taskns49' already has Deployment 'shop' and Service 'shop-svc' (port 80), plus GatewayClass 'shop-gc' and Gateway 'shop-gw' (HTTP listener on 80). Create an HTTPRoute 'shop-route' that attaches to shop-gw via parentRefs, matches hostname 'shop.practice.local', and forwards path prefix '/' to shop-svc on port 80.",
+    "verify": "kubectl get httproute shop-route -n taskns49 -o jsonpath='{.spec.parentRefs[0].name}' | grep -q shop-gw && kubectl get httproute shop-route -n taskns49 -o jsonpath='{.spec.rules[0].backendRefs[0].name}' | grep -q shop-svc"
+  },
+  {
+    "id": "t50",
+    "level": "hard",
+    "domain": "Services & Networking",
+    "title": "HTTPRoute traffic splitting by weight",
+    "prompt": "Namespace 'taskns50' already has Services 'v1-svc' and 'v2-svc' (both port 80), a GatewayClass and Gateway 'split-gw'. Create an HTTPRoute 'canary-route' attached to split-gw that sends 90% of traffic to v1-svc and 10% to v2-svc using backendRef weights.",
+    "verify": "w=$(kubectl get httproute canary-route -n taskns50 -o jsonpath='{.spec.rules[0].backendRefs[*].weight}' 2>/dev/null); echo \"$w\" | grep -q 90 && echo \"$w\" | grep -q 10"
+  },
+  {
+    "id": "t51",
+    "level": "hard",
+    "domain": "Services & Networking",
+    "title": "Cross-namespace HTTPRoute with ReferenceGrant",
+    "prompt": "Namespace 'taskns51-gw' has Gateway 'shared-gw' (listener allows routes from All namespaces). Namespace 'taskns51-app' has Service 'remote-svc' (port 80). In taskns51-app create an HTTPRoute 'remote-route' whose parentRef points at shared-gw in taskns51-gw (cross-namespace), and create the ReferenceGrant in taskns51-gw that permits it.",
+    "verify": "kubectl get httproute remote-route -n taskns51-app -o jsonpath='{.spec.parentRefs[0].namespace}' | grep -q taskns51-gw && kubectl get referencegrant -n taskns51-gw -o name 2>/dev/null | grep -q referencegrant"
+  },
+  {
+    "id": "t52",
+    "level": "medium",
+    "domain": "Cluster Architecture, Installation & Configuration",
+    "title": "Create a join token for a new worker",
+    "prompt": "On cka-practice-control-plane, create a NEW bootstrap token and produce the full 'kubeadm join' command a fresh worker would run. Save that command to /tmp/join-command.txt on that node. (Don't actually join a node - just generate it.)",
+    "verify": "docker exec cka-practice-control-plane test -f /tmp/join-command.txt && docker exec cka-practice-control-plane grep -q 'kubeadm join' /tmp/join-command.txt && docker exec cka-practice-control-plane grep -q 'discovery-token-ca-cert-hash' /tmp/join-command.txt && [ \"$(docker exec cka-practice-control-plane kubeadm token list 2>/dev/null | tail -n +2 | wc -l)\" -ge 2 ]"
+  },
+  {
+    "id": "t53",
+    "level": "medium",
+    "domain": "Cluster Architecture, Installation & Configuration",
+    "title": "Renew the apiserver certificate",
+    "prompt": "On cka-practice-control-plane, renew ONLY the apiserver certificate with kubeadm, then write the fresh 'kubeadm certs check-expiration' output to /tmp/renewed-certs.txt on that node. The apiserver cert's expiry must be later than the other certs', proving it was reissued.",
+    "verify": "docker exec cka-practice-control-plane test -f /tmp/renewed-certs.txt && docker exec cka-practice-control-plane sh -c 'test $(openssl x509 -enddate -noout -in /etc/kubernetes/pki/apiserver.crt | cut -d= -f2 | xargs -I{} date -d \"{}\" +%s) -gt $(openssl x509 -enddate -noout -in /etc/kubernetes/pki/apiserver-kubelet-client.crt | cut -d= -f2 | xargs -I{} date -d \"{}\" +%s)'"
+  },
+  {
+    "id": "t54",
+    "level": "easy",
+    "domain": "Cluster Architecture, Installation & Configuration",
+    "title": "Check what an upgrade would do",
+    "prompt": "On cka-practice-control-plane, run the kubeadm command that reports which versions this cluster can upgrade to, and save its full output to /tmp/upgrade-plan.txt on that node.",
+    "verify": "docker exec cka-practice-control-plane test -f /tmp/upgrade-plan.txt && docker exec cka-practice-control-plane grep -qi 'cluster version' /tmp/upgrade-plan.txt"
+  },
+  {
+    "id": "t55",
+    "level": "hard",
+    "domain": "Cluster Architecture, Installation & Configuration",
+    "title": "Upgrade a cluster with kubeadm (needs upgrade-lab)",
+    "prompt": "Run './upgrade-lab.sh up' first - it builds a separate 'cka-upgrade' cluster at v1.35.0. Upgrade its CONTROL-PLANE node to v1.35.8 the exam way: drain the node, put the v1.35.8 kubeadm binary in place, 'kubeadm upgrade apply v1.35.8', upgrade kubelet, restart it, uncordon. The node must report v1.35.8 and be Ready. ('./upgrade-lab.sh task' reprints these steps, 'down' cleans up.)",
+    "verify": "kubectl --context kind-cka-upgrade get node cka-upgrade-control-plane -o jsonpath='{.status.nodeInfo.kubeletVersion}' 2>/dev/null | grep -q 'v1.35.8'"
+  }
+]

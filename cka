@@ -1,0 +1,691 @@
+#!/usr/bin/env bash
+# CKA practice manager - activate/deactivate exercises, track progress.
+set -euo pipefail
+
+# Resolve through symlinks so this works when linked onto PATH.
+DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+SCEN_DIR="$DIR/scenarios"
+TASK_DIR="$DIR/tasks"
+PROGRESS="$DIR/progress.json"
+
+# shellcheck source=lib/ui.sh
+. "$DIR/lib/ui.sh"
+
+init_progress() {
+  [ -f "$PROGRESS" ] || echo '{"scenarios":{},"tasks":{},"active":null}' > "$PROGRESS"
+}
+
+jqp() { jq -r "$@" "$PROGRESS"; }
+
+save_progress() {
+  local tmp; tmp=$(mktemp)
+  jq "$1" "$PROGRESS" > "$tmp" && mv "$tmp" "$PROGRESS"
+}
+
+usage() {
+  cat <<EOF
+Usage: cka <command> [args]
+
+  -i                             Interactive menu - start here if unsure
+  list [all|scenarios|tasks] [reveal]
+                                 List exercises and what you've solved.
+                                 Add 'reveal' to un-hide scenario titles (spoilers).
+  start <s01..s33|t01..t47>      Begin an exercise
+  check [id]                     Grade it (defaults to the one you're working on)
+  stop                           Finish up: clean the cluster, pick another
+  status                         Progress by exam topic
+  exam start|next|status|finish|abort
+                                 Timed mock exam: 16-20 tasks, 2h, 66% to pass
+  pass <id> / fail <id>          Override a grade by hand
+  reset-progress                 Erase all recorded progress (cluster untouched)
+
+How it works: 's' exercises break your cluster and you fix them; 't' exercises ask you
+to build or connect something. Neither tells you the root cause up front - same as the
+real exam. 'check' runs a real kubectl assertion, so grading is automatic.
+EOF
+}
+
+id_kind() {
+  case "$1" in
+    s*) echo scenario ;;
+    t*) echo task ;;
+    *) echo "unknown id: $1" >&2; exit 1 ;;
+  esac
+}
+
+scenario_meta() { jq -r ".[] | select(.id==\"$1\")" "$SCEN_DIR/scenarios.json"; }
+task_meta() { jq -r ".[] | select(.id==\"$1\")" "$TASK_DIR/tasks.json"; }
+
+abbrev_domain() {
+  case "$1" in
+    "Cluster Architecture, Installation & Configuration") echo "cluster " ;;
+    "Workloads & Scheduling")                             echo "workload" ;;
+    "Services & Networking")                              echo "network " ;;
+    "Storage")                                            echo "storage " ;;
+    *)                                                    echo "other   " ;;
+  esac
+}
+
+# Emits "id<TAB>display" rows, used by both list_cmd and the pickers.
+# Scenario titles name the fault, so they stay hidden until the scenario is solved -
+# otherwise browsing the list gives away every answer. Pass "reveal" to show them.
+rows_for() {
+  local kind="$1" mode="${2:-hide}" want_level="${3:-all}" file bucket
+  if [ "$kind" = scenario ]; then
+    file="$SCEN_DIR/scenarios.json"; bucket=scenarios
+  else
+    file="$TASK_DIR/tasks.json"; bucket=tasks
+  fi
+  local id domain title level st shown
+  while IFS=$'\t' read -r id level domain title; do
+    [ "$want_level" = all ] || [ "$want_level" = "$level" ] || continue
+    st=$(jqp ".${bucket}[\"$id\"] // \"-\"")
+    if [ "$kind" = scenario ] && [ "$mode" != reveal ] && [ "$st" != pass ]; then
+      # Show where the symptom shows up, never what the fault is.
+      local ns; ns=$(jq -r --arg i "$id" '.[] | select(.id==$i) | .namespace // empty' "$file")
+      if [ -n "$ns" ]; then
+        shown="something is broken in namespace $ns"
+      else
+        shown="something is broken at cluster/node level"
+      fi
+    else
+      shown="$title"
+    fi
+    printf '%s\t%s  %s  %-6s %-46s %s\n' \
+      "$id" "$id" "$(ui_status_tag "$st")" "$level" "$shown" "$(abbrev_domain "$domain")"
+  done < <(jq -r '.[] | [.id, .level, .domain, .title] | @tsv' "$file")
+}
+
+list_cmd() {
+  local which="${1:-all}" mode="${2:-hide}" lvl="${3:-all}"
+  init_progress
+  if [ "$which" = "scenarios" ] || [ "$which" = "all" ]; then
+    ui_header "Broken-cluster exercises" "find the fault and fix it"
+    rows_for scenario "$mode" "$lvl" | cut -f2-
+    [ "$mode" != reveal ] && ui_dim "Titles hidden until solved (they'd name the fault). 'cka list all reveal' to show."
+  fi
+  if [ "$which" = "tasks" ] || [ "$which" = "all" ]; then
+    ui_header "Build exercises" "create and connect resources from a spec"
+    rows_for task "$mode" "$lvl" | cut -f2-
+  fi
+}
+
+start_cmd() {
+  local id="$1"
+  init_progress
+  local kind; kind=$(id_kind "$id")
+  local cur; cur=$(jqp '.active')
+  if [ "$cur" != "null" ]; then
+    echo "Exercise '$cur' is already active. Run 'cka stop' first." >&2
+    exit 1
+  fi
+
+  if [ "$kind" = scenario ]; then
+    local n="${id#s}"
+    local script="$SCEN_DIR/${n}-break.sh"
+    [ -f "$script" ] || { echo "no script for $id" >&2; exit 1; }
+    bash "$script"
+    save_progress ".active=\"$id\" | .scenarios[\"$id\"]=\"in progress\""
+  else
+    local meta; meta=$(task_meta "$id")
+    [ -n "$meta" ] || { echo "unknown task $id" >&2; exit 1; }
+    local n="${id#t}"
+    local seed="$TASK_DIR/${n}-seed.sh"
+    [ -f "$seed" ] && bash "$seed" >/dev/null
+    ui_info "$id - $(echo "$meta" | jq -r .title)"
+    echo
+    echo "$meta" | jq -r .prompt
+    save_progress ".active=\"$id\" | .tasks[\"$id\"]=\"in progress\""
+  fi
+}
+
+check_cmd() {
+  local id="${1:-}"
+  init_progress
+  [ -n "$id" ] || id=$(jqp '.active')
+  [ "$id" != "null" ] || { echo "no active exercise, pass an id" >&2; exit 1; }
+  local kind; kind=$(id_kind "$id")
+
+  local meta bucket
+  if [ "$kind" = scenario ]; then
+    meta=$(scenario_meta "$id"); bucket=scenarios
+  else
+    meta=$(task_meta "$id"); bucket=tasks
+  fi
+  [ -n "$meta" ] || { echo "unknown exercise $id" >&2; exit 1; }
+
+  local verify; verify=$(echo "$meta" | jq -r '.verify // empty')
+  if [ -z "$verify" ]; then
+    echo "No auto-verify defined for $id. Check scenarios/EXERCISES.md, then:"
+    echo "  cka pass $id   /  cka fail $id"
+    return 0
+  fi
+
+  if [ "$kind" = scenario ]; then
+    ui_dim "Checking $id ..."
+  else
+    ui_dim "Checking $id: $(echo "$meta" | jq -r .title) ..."
+  fi
+  if eval "$verify" >/dev/null 2>&1; then
+    ui_ok "CORRECT - $id solved"
+    save_progress ".${bucket}[\"$id\"]=\"pass\""
+    return 0
+  else
+    ui_err "NOT SOLVED YET - $id"
+    save_progress ".${bucket}[\"$id\"]=\"fail\""
+    return 1
+  fi
+}
+
+pass_cmd() {
+  local id="$1"; init_progress
+  local kind; kind=$(id_kind "$id")
+  save_progress ".${kind}s[\"$id\"]=\"pass\""
+  echo "Marked $id as pass."
+}
+
+fail_cmd() {
+  local id="$1"; init_progress
+  local kind; kind=$(id_kind "$id")
+  save_progress ".${kind}s[\"$id\"]=\"fail\""
+  echo "Marked $id as fail."
+}
+
+stop_cmd() {
+  init_progress
+  local cur; cur=$(jqp '.active')
+  if [ "$cur" = "null" ]; then
+    echo "Nothing active."
+  else
+    echo "Deactivating $cur..."
+  fi
+  bash "$SCEN_DIR/reset.sh"
+  save_progress '.active=null'
+}
+
+bar() { ui_bar "$@"; }
+
+status_cmd() {
+  init_progress
+  local cur; cur=$(jqp '.active')
+  local sp st tp tt
+  sp=$(jqp '[.scenarios[] | select(.=="pass")] | length')
+  st=$(jq 'length' "$SCEN_DIR/scenarios.json")
+  tp=$(jqp '[.tasks[] | select(.=="pass")] | length')
+  tt=$(jq 'length' "$TASK_DIR/tasks.json")
+
+  echo "Active exercise: $cur"
+  echo
+  printf 'Scenarios  %s\n' "$(bar "$sp" "$st")"
+  printf 'Tasks      %s\n' "$(bar "$tp" "$tt")"
+  printf 'Overall    %s\n' "$(bar "$((sp+tp))" "$((st+tt))")"
+
+  echo
+  echo "By exam domain:"
+  local domains; domains=$(jq -rs 'add | map(.domain) | unique | .[]' \
+    "$SCEN_DIR/scenarios.json" "$TASK_DIR/tasks.json")
+  while IFS= read -r d; do
+    [ -n "$d" ] || continue
+    local dtot dpass
+    dtot=$(jq -rs --arg d "$d" 'add | map(select(.domain==$d)) | length' \
+      "$SCEN_DIR/scenarios.json" "$TASK_DIR/tasks.json")
+    dpass=$(jq -rs --arg d "$d" --slurpfile p "$PROGRESS" '
+      add | map(select(.domain==$d) | .id)
+          | map(select(($p[0].scenarios[.] // $p[0].tasks[.] // "") == "pass"))
+          | length' "$SCEN_DIR/scenarios.json" "$TASK_DIR/tasks.json")
+    printf '  %-52s %s\n' "$d" "$(bar "$dpass" "$dtot")"
+  done <<< "$domains"
+
+  echo
+  echo "By difficulty:"
+  local l
+  for l in easy medium hard; do
+    local ltot lpass
+    ltot=$(jq -rs --arg l "$l" 'add | map(select(.level==$l)) | length' \
+      "$SCEN_DIR/scenarios.json" "$TASK_DIR/tasks.json")
+    lpass=$(jq -rs --arg l "$l" --slurpfile p "$PROGRESS" '
+      add | map(select(.level==$l) | .id)
+          | map(select(($p[0].scenarios[.] // $p[0].tasks[.] // "") == "pass"))
+          | length' "$SCEN_DIR/scenarios.json" "$TASK_DIR/tasks.json")
+    printf '  %-52s %s\n' "$l" "$(bar "$lpass" "$ltot")"
+  done
+
+  local passed; passed=$(jqp '[(.scenarios, .tasks) | to_entries[] | select(.value=="pass") | .key] | sort | join(" ")')
+  local failed; failed=$(jqp '[(.scenarios, .tasks) | to_entries[] | select(.value=="fail") | .key] | sort | join(" ")')
+  echo
+  [ -n "$passed" ] && echo "Completed: $passed" || echo "Completed: (none yet)"
+  [ -n "$failed" ] && echo "Attempted, not passing: $failed"
+}
+
+reset_progress_cmd() {
+  echo '{"scenarios":{},"tasks":{},"active":null}' > "$PROGRESS"
+  echo "Progress wiped."
+}
+
+# ---------------------------------------------------------------- mock exam --
+# Real CKA: ~17 tasks, 2 hours, 66% to pass, all tasks weighted equally.
+EXAM="$DIR/exam.json"
+EXAM_MIN_TASKS=16
+EXAM_MAX_TASKS=20
+EXAM_SECONDS=7200
+EXAM_PASS_PCT=66
+
+jqe() { jq -r "$@" "$EXAM"; }
+save_exam() { local t; t=$(mktemp); jq "$1" "$EXAM" > "$t" && mv "$t" "$EXAM"; }
+
+# Pull n random ids for a domain, scenarios and tasks pooled together.
+exam_sample_domain() {
+  local domain="$1" n="$2"
+  jq -rs --arg d "$domain" 'add | map(select(.domain==$d) | .id) | .[]' \
+    "$SCEN_DIR/scenarios.json" "$TASK_DIR/tasks.json" | shuf | head -n "$n"
+}
+
+# Roughly the published blueprint (cluster 25%, networking 20%, workloads 15%,
+# storage 10%, troubleshooting 30%), but each slot count is jittered by +/-1 so no
+# two exams have the same shape - the real one varies too.
+jitter() {
+  local base="$1" min="${2:-1}" out
+  out=$(( base + (RANDOM % 3) - 1 ))
+  [ "$out" -lt "$min" ] && out=$min
+  echo "$out"
+}
+
+exam_build_set() {
+  local n="$1"
+  local cluster networking workloads storage
+  cluster=$(jitter $(( n * 25 / 100 )))
+  networking=$(jitter $(( n * 20 / 100 )))
+  workloads=$(jitter $(( n * 15 / 100 )))
+  storage=$(jitter $(( n * 10 / 100 )))
+
+  {
+    exam_sample_domain "Cluster Architecture, Installation & Configuration" "$cluster"
+    exam_sample_domain "Services & Networking" "$networking"
+    exam_sample_domain "Workloads & Scheduling" "$workloads"
+    exam_sample_domain "Storage" "$storage"
+    # Remainder is troubleshooting: break-and-fix scenarios, any domain.
+    jq -r '.[].id' "$SCEN_DIR/scenarios.json" | shuf
+    # Backstop so we always reach n even if a pool ran dry.
+    jq -rs 'add | .[].id' "$SCEN_DIR/scenarios.json" "$TASK_DIR/tasks.json" | shuf
+  } | awk '!seen[$0]++' | head -n "$n" | shuf
+}
+
+exam_start() {
+  init_progress
+  if [ -f "$EXAM" ] && [ "$(jqe '.finished')" = "false" ]; then
+    ui_err "An exam is already running. 'cka exam status', or 'cka exam abort'."
+    return 1
+  fi
+  local cur; cur=$(jqp '.active')
+  [ "$cur" = "null" ] || { ui_err "Finish the current exercise first ('cka stop')."; return 1; }
+
+  # Task count varies per sitting, like the real exam.
+  local n=$(( EXAM_MIN_TASKS + RANDOM % (EXAM_MAX_TASKS - EXAM_MIN_TASKS + 1) ))
+  local ids; ids=$(exam_build_set "$n")
+  local count; count=$(printf '%s\n' "$ids" | grep -c .)
+
+  jq -n --argjson start "$(date +%s)" --argjson limit "$EXAM_SECONDS" \
+        --argjson total "$count" \
+        --arg ids "$(printf '%s' "$ids" | tr '\n' ' ')" '
+    { started: $start, limit: $limit, total: $total, finished: false, current: null,
+      queue: ($ids | rtrimstr(" ") | split(" ")), results: {} }' > "$EXAM"
+
+  ui_header "MOCK EXAM STARTED" "$count tasks - 2 hours - need ${EXAM_PASS_PCT}% to pass"
+  cat <<EOF
+Rules, same as the real thing:
+  - The clock does not stop. $((EXAM_SECONDS/60)) minutes total.
+  - Tasks are graded at the END, not as you go. You get no feedback during the exam.
+  - You may skip a task and come back only by going through the queue again.
+  - Every task counts the same. You need $(( (count * EXAM_PASS_PCT + 99) / 100 )) of $count correct.
+
+'cka exam next'   - load the next task
+'cka exam status' - time left and how far through you are
+'cka exam finish' - grade everything and stop the clock
+EOF
+  exam_next
+}
+
+exam_time_left() {
+  local started limit now left
+  started=$(jqe '.started'); limit=$(jqe '.limit'); now=$(date +%s)
+  left=$(( started + limit - now ))
+  [ "$left" -lt 0 ] && left=0
+  echo "$left"
+}
+
+exam_fmt_time() { printf '%d:%02d' $(( $1 / 60 )) $(( $1 % 60 )); }
+
+# Run one task's verify and bank the result, silently - no feedback mid-exam.
+exam_grade_one() {
+  local id="$1" meta verify
+  [ -n "$id" ] && [ "$id" != null ] || return 0
+  if [ "$(id_kind "$id")" = scenario ]; then meta=$(scenario_meta "$id"); else meta=$(task_meta "$id"); fi
+  verify=$(echo "$meta" | jq -r '.verify // empty')
+  if [ -n "$verify" ] && eval "$verify" >/dev/null 2>&1; then
+    save_exam ".results[\"$id\"] = \"correct\""
+  else
+    save_exam ".results[\"$id\"] = \"wrong\""
+  fi
+}
+
+exam_next() {
+  [ -f "$EXAM" ] || { ui_err "No exam running. 'cka exam start'."; return 1; }
+  [ "$(jqe '.finished')" = "false" ] || { ui_err "That exam is over."; return 1; }
+
+  local left; left=$(exam_time_left)
+  if [ "$left" -le 0 ]; then
+    ui_err "TIME IS UP."
+    exam_finish
+    return 0
+  fi
+
+  # The cluster only holds one exercise at a time, so the previous task has to be
+  # graded NOW - once it's torn down its resources are gone and it can't be checked.
+  # The score is still withheld until the exam ends.
+  local cur; cur=$(jqp '.active')
+  if [ "$cur" != "null" ]; then
+    exam_grade_one "$cur"
+    ui_dim "Locked in. Cleaning up..."
+    stop_cmd >/dev/null 2>&1
+  fi
+
+  local nxt; nxt=$(jqe '.queue[0] // empty')
+  if [ -z "$nxt" ]; then
+    ui_info "That was the last task."
+    exam_finish
+    return 0
+  fi
+
+  save_exam '.queue = .queue[1:] | .current = "'"$nxt"'"'
+  save_exam '.results["'"$nxt"'"] = "attempted"'
+
+  local done_n total
+  done_n=$(jqe '.results | length'); total=$(jqe '.total')
+  ui_header "EXAM  -  task $done_n of $total" "time left: $(exam_fmt_time "$left")"
+  start_cmd "$nxt"
+  echo
+  ui_dim "'cka exam next' when you're done with this one (no going back)."
+}
+
+exam_status() {
+  [ -f "$EXAM" ] || { ui_err "No exam has been run yet."; return 1; }
+  local left; left=$(exam_time_left)
+  local done_n; done_n=$(jqe '.results | length')
+  if [ "$(jqe '.finished')" = "true" ]; then
+    ui_dim "Last exam is finished. 'cka exam start' for a new one."
+    return 0
+  fi
+  ui_header "EXAM in progress" "task $done_n of $(jqe '.total')   time left: $(exam_fmt_time "$left")"
+  ui_dim "Current task: $(jqe '.current')"
+}
+
+exam_finish() {
+  [ -f "$EXAM" ] || { ui_err "No exam running."; return 1; }
+  [ "$(jqe '.finished')" = "false" ] || { ui_err "Already graded."; return 1; }
+
+  local left; left=$(exam_time_left)
+  local used=$(( EXAM_SECONDS - left ))
+
+  # Grade whatever is still loaded; every earlier task was already graded at the
+  # moment you moved past it.
+  local cur; cur=$(jqp '.active')
+  [ "$cur" != "null" ] && exam_grade_one "$cur"
+
+  # Anything never reached counts against you, same as running out of time.
+  local skipped
+  for skipped in $(jqe '.queue[]?'); do
+    save_exam ".results[\"$skipped\"] = \"not attempted\""
+  done
+  save_exam '.queue = []'
+
+  ui_header "RESULTS" "each task was graded as you moved off it"
+  echo
+
+  local ids; ids=$(jqe '.results | keys[]')
+  local total=0 correct=0 id meta
+  local -a wrong=()
+  for id in $ids; do
+    total=$((total+1))
+    if [ "$(jqe ".results[\"$id\"]")" = correct ]; then
+      correct=$((correct+1))
+      printf '  %-5s %s\n' "$id" "$(ui_status_tag pass)"
+    else
+      wrong+=("$id")
+      printf '  %-5s %s\n' "$id" "$(ui_status_tag fail)"
+    fi
+  done
+
+  save_exam '.finished = true'
+
+  local pct=0
+  [ "$total" -gt 0 ] && pct=$(( correct * 100 / total ))
+  echo
+  printf 'Score: %d/%d = %d%%   (pass mark %d%%)\n' "$correct" "$total" "$pct" "$EXAM_PASS_PCT"
+  printf 'Time used: %s of %s\n' "$(exam_fmt_time "$used")" "$(exam_fmt_time "$EXAM_SECONDS")"
+  echo
+  if [ "$pct" -ge "$EXAM_PASS_PCT" ]; then
+    ui_ok "PASS"
+  else
+    ui_err "FAIL - needed $(( (total * EXAM_PASS_PCT + 99) / 100 )) of $total"
+  fi
+
+  if [ "${#wrong[@]}" -gt 0 ]; then
+    echo
+    echo "Weak spots - these came up and you didn't get them:"
+    for id in "${wrong[@]}"; do
+      if [ "$(id_kind "$id")" = scenario ]; then meta=$(scenario_meta "$id"); else meta=$(task_meta "$id"); fi
+      printf '  %-5s %-10s %s\n' "$id" "$(echo "$meta" | jq -r .level)" "$(echo "$meta" | jq -r .domain)"
+    done
+    echo
+    ui_dim "Practise them individually with: cka start <id>"
+  fi
+
+  stop_cmd >/dev/null 2>&1
+}
+
+exam_abort() {
+  [ -f "$EXAM" ] || { ui_err "No exam running."; return 1; }
+  save_exam '.finished = true'
+  stop_cmd >/dev/null 2>&1
+  ui_dim "Exam abandoned, cluster cleaned."
+}
+
+exam_cmd() {
+  case "${1:-status}" in
+    start)  exam_start ;;
+    next)   exam_next ;;
+    status) exam_status ;;
+    finish) exam_finish ;;
+    abort)  exam_abort ;;
+    *) echo "usage: cka exam [start|next|status|finish|abort]" >&2; return 1 ;;
+  esac
+}
+
+pick_exercise() {
+  local kind="$1" header lvl
+  [ "$kind" = scenario ] && header="Pick one to fix" || header="Pick one to build"
+
+  lvl=$(ui_menu "Difficulty?" \
+    "all|Any difficulty" \
+    "easy|easy    - one concept on its own" \
+    "medium|medium  - two concepts combined" \
+    "hard|hard    - components interacting, or node-level work") || { ui_dim "Cancelled."; return 0; }
+
+  local rows; rows=$(rows_for "$kind" hide "$lvl")
+  [ -n "$rows" ] || { ui_err "Nothing at that level."; return 0; }
+
+  local id
+  id=$(printf '%s\n' "$rows" | ui_pick "$header") || { ui_dim "Cancelled."; return 0; }
+  [ -n "$id" ] || { ui_dim "Cancelled."; return 0; }
+  echo
+  start_cmd "$id"
+}
+
+show_answer_hint() {
+  local id="$1"
+  if [ "$(id_kind "$id")" != scenario ]; then
+    ui_info "Task $id - what's being checked:"
+    task_meta "$id" | jq -r .verify
+    return 0
+  fi
+
+  ui_confirm "Show the full answer for $id?" || { ui_dim "Ok, keeping it hidden."; return 0; }
+  local n="${id#s}"
+  # Pull the <details> block for this scenario out of the answer key.
+  awk -v want="$((10#$n))" '
+    /^### Scenario /   { cur = $3 + 0; next }
+    cur == want && /<details>/ { on = 1; next }
+    cur == want && /<\/details>/ { on = 0 }
+    on && !/^<summary>/ { print }
+  ' "$SCEN_DIR/EXERCISES.md"
+  ui_dim "(full write-up: scenarios/EXERCISES.md)"
+}
+
+exercise_title() {
+  local id="$1" meta
+  if [ "$(id_kind "$id")" = scenario ]; then meta=$(scenario_meta "$id"); else meta=$(task_meta "$id"); fi
+  echo "$meta" | jq -r .title
+}
+
+# Reprint the working exercise: what it is and what you're expected to do.
+show_current() {
+  local id="$1"
+  if [ "$(id_kind "$id")" = scenario ]; then
+    ui_info "Scenario $id"
+    ui_dim "Something in the cluster is broken. Find it with kubectl and fix it."
+    local ns; ns=$(scenario_meta "$id" | jq -r '.namespace // empty')
+    if [ -n "$ns" ]; then
+      ui_dim "Affected namespace: $ns"
+      ui_dim "Try: kubectl get all -n $ns   /   kubectl describe ... -n $ns"
+    else
+      ui_dim "It's cluster/node level, not inside one namespace."
+      ui_dim "Try: kubectl get nodes   /   kubectl get pods -n kube-system"
+    fi
+  else
+    ui_info "Working on $id - $(exercise_title "$id")"
+    echo
+    task_meta "$id" | jq -r .prompt
+  fi
+}
+
+interactive_cmd() {
+  init_progress
+  while true; do
+    local active sp st tp tt total_pass total_all
+    active=$(jqp '.active')
+    sp=$(jqp '[.scenarios[] | select(.=="pass")] | length')
+    st=$(jq 'length' "$SCEN_DIR/scenarios.json")
+    tp=$(jqp '[.tasks[] | select(.=="pass")] | length')
+    tt=$(jq 'length' "$TASK_DIR/tasks.json")
+    total_pass=$((sp+tp)); total_all=$((st+tt))
+
+    local choice
+    if [ "$active" = "null" ]; then
+      # ---- Nothing running: only offer ways to begin ----
+      ui_header "CKA practice" "$total_pass of $total_all done   $(ui_bar "$total_pass" "$total_all")"
+      cat <<EOF
+Two kinds of practice question, both like the real exam:
+
+  BREAK-AND-FIX   I sabotage your cluster on purpose. You get told only which
+                  namespace or node is affected - not what I did. You dig with
+                  kubectl until you find it and repair it.
+                  Example: a Deployment suddenly won't start. Why? Fix it.
+                  -> $sp of $st solved
+
+  BUILD           I give you a written spec. You create or wire up the resources
+                  to match it, from scratch or on top of what's already there.
+                  Example: "expose this Deployment on nodePort 30081."
+                  -> $tp of $tt solved
+
+Either way, "grade it" runs a real kubectl check against your cluster.
+
+EOF
+
+      choice=$(ui_menu "Pick one:" \
+        "scenario|BREAK-AND-FIX  - I break it, you find and repair it" \
+        "task|BUILD          - I describe it, you create it" \
+        "exam|MOCK EXAM      - 16-20 tasks, 2h clock, graded at the end" \
+        "list|Browse all questions and what I've solved" \
+        "status|My progress, split by exam topic" \
+        "wipe|Erase my progress and start over" \
+        "quit|Quit") || { ui_dim "Bye."; break; }
+    else
+      # ---- Exercise running: only offer ways to work on / finish it ----
+      local headline
+      if [ "$(id_kind "$active")" = scenario ]; then
+        # Never show a scenario's title here - it names the fault, which is the answer.
+        local ns; ns=$(scenario_meta "$active" | jq -r '.namespace // empty')
+        headline="Working on: $active  (broken cluster)"
+        [ -n "$ns" ] && headline="$headline  -  namespace: $ns"
+      else
+        headline="Working on: $active - $(exercise_title "$active")"
+      fi
+      ui_header "$headline" "$total_pass of $total_all done"
+      if [ "$(id_kind "$active")" = scenario ]; then
+        local ns2; ns2=$(scenario_meta "$active" | jq -r '.namespace // empty')
+        echo "Your cluster is broken on purpose. Find what's wrong and repair it."
+        echo
+        echo "Start looking here:"
+        if [ -n "$ns2" ]; then
+          echo "  kubectl get all -n $ns2"
+          echo "  kubectl describe pod <name> -n $ns2      # check Events at the bottom"
+          echo "  kubectl logs <name> -n $ns2"
+        else
+          echo "  kubectl get nodes"
+          echo "  kubectl get pods -n kube-system"
+          echo "  docker exec -it cka-practice-control-plane bash    # shell onto a node"
+        fi
+      else
+        echo "Build what the spec asks for. Re-read it with option 2 below."
+      fi
+      echo
+      ui_dim "Work in another terminal, then come back and grade it."
+
+      choice=$(ui_menu "" \
+        "check|Grade it now - am I done?" \
+        "again|Show me the exercise again" \
+        "answer|I'm stuck - where's the answer?" \
+        "stop|Give up / finished - clean the cluster and pick another" \
+        "list|See every exercise and what I've finished" \
+        "status|See my progress by exam topic" \
+        "quit|Quit") || { ui_dim "Bye."; break; }
+    fi
+
+    echo
+    case "$choice" in
+      scenario) pick_exercise scenario ;;
+      task)     pick_exercise task ;;
+      exam)     exam_cmd start || true ;;
+      check)
+        if check_cmd "" ; then
+          ui_dim "Done with it? Choose 'Give up / finished' to clean up and pick the next one."
+        else
+          ui_dim "Not there yet. Keep going, or pick 'I'm stuck' for the answer."
+        fi ;;
+      again)    show_current "$active" ;;
+      answer)   show_answer_hint "$active" ;;
+      stop)     stop_cmd ;;
+      list)     list_cmd all ;;
+      status)   status_cmd ;;
+      wipe)     if ui_confirm "Erase all recorded progress?"; then reset_progress_cmd; else ui_dim "Cancelled."; fi ;;
+      quit)     ui_dim "Bye."; break ;;
+      *)        ui_err "Unknown choice." ;;
+    esac
+  done
+}
+
+cmd="${1:-}"
+shift || true
+case "$cmd" in
+  -i|--interactive|interactive) interactive_cmd ;;
+  list) list_cmd "${1:-all}" "${2:-hide}" "${3:-all}" ;;
+  exam) exam_cmd "${1:-status}" ;;
+  start) start_cmd "${1:?id required}" ;;
+  check) check_cmd "${1:-}" || exit 1 ;;
+  pass) pass_cmd "${1:?id required}" ;;
+  fail) fail_cmd "${1:?id required}" ;;
+  stop) stop_cmd ;;
+  status) status_cmd ;;
+  reset-progress) reset_progress_cmd ;;
+  *) usage; exit 1 ;;
+esac

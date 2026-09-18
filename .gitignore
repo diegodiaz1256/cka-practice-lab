@@ -1,0 +1,12 @@
+# Cluster-admin credentials - never commit
+kubeconfig
+
+# Local overrides: host/IP/DNS specific to your own setup
+cka.conf.local
+
+# Generated at cluster creation from cka.conf
+.kind-config.generated.yaml
+
+# Per-run state, not source
+progress.json
+exam.json

@@ -1,0 +1,274 @@
+[
+  {
+    "id": "s01",
+    "level": "easy",
+    "domain": "Workloads & Scheduling",
+    "title": "Deployment CrashLoopBackOff",
+    "namespace": "scenario1",
+    "verify": "[ \"$(kubectl get deployment web -n scenario1 -o jsonpath='{.status.readyReplicas}' 2>/dev/null)\" = \"2\" ]"
+  },
+  {
+    "id": "s02",
+    "level": "easy",
+    "domain": "Services & Networking",
+    "title": "Service selector mismatch",
+    "namespace": "scenario2",
+    "verify": "kubectl get endpointslice -n scenario2 -l kubernetes.io/service-name=api-svc -o jsonpath='{.items[*].endpoints[*].addresses[*]}' 2>/dev/null | grep -q ."
+  },
+  {
+    "id": "s03",
+    "level": "easy",
+    "domain": "Workloads & Scheduling",
+    "title": "Pod unschedulable - resources",
+    "namespace": "scenario3",
+    "verify": "[ \"$(kubectl get pod big-pod -n scenario3 -o jsonpath='{.status.phase}' 2>/dev/null)\" = \"Running\" ]"
+  },
+  {
+    "id": "s04",
+    "level": "hard",
+    "domain": "Cluster Architecture, Installation & Configuration",
+    "title": "Node NotReady - kubelet down",
+    "namespace": null,
+    "verify": "[ \"$(kubectl get node cka-practice-worker -o jsonpath='{.status.conditions[?(@.type==\\\"Ready\\\")].status}' 2>/dev/null)\" = \"True\" ] && docker exec cka-practice-worker systemctl is-active kubelet >/dev/null 2>&1"
+  },
+  {
+    "id": "s05",
+    "level": "medium",
+    "domain": "Cluster Architecture, Installation & Configuration",
+    "title": "RBAC Forbidden",
+    "namespace": "scenario5",
+    "verify": "kubectl auth can-i list pods --as=system:serviceaccount:scenario5:watcher -n scenario5 2>/dev/null | grep -q '^yes$'"
+  },
+  {
+    "id": "s06",
+    "level": "hard",
+    "domain": "Cluster Architecture, Installation & Configuration",
+    "title": "Control plane static pod broken",
+    "namespace": null,
+    "verify": "[ \"$(kubectl get pod kube-scheduler-cka-practice-control-plane -n kube-system -o jsonpath='{.status.containerStatuses[0].ready}' 2>/dev/null)\" = \"true\" ]"
+  },
+  {
+    "id": "s07",
+    "level": "easy",
+    "domain": "Workloads & Scheduling",
+    "title": "ImagePullBackOff",
+    "namespace": "scenario7",
+    "verify": "[ \"$(kubectl get deployment cache -n scenario7 -o jsonpath='{.status.readyReplicas}' 2>/dev/null)\" = \"1\" ]"
+  },
+  {
+    "id": "s08",
+    "level": "medium",
+    "domain": "Workloads & Scheduling",
+    "title": "Pod unschedulable - taint",
+    "namespace": "scenario8",
+    "verify": "[ \"$(kubectl get pod needs-gpu-node -n scenario8 -o jsonpath='{.status.phase}' 2>/dev/null)\" = \"Running\" ]"
+  },
+  {
+    "id": "s09",
+    "level": "medium",
+    "domain": "Storage",
+    "title": "PVC unbound - bad StorageClass",
+    "namespace": "scenario9",
+    "verify": "[ \"$(kubectl get pvc data-claim -n scenario9 -o jsonpath='{.status.phase}' 2>/dev/null)\" = \"Bound\" ] && [ \"$(kubectl get deployment db -n scenario9 -o jsonpath='{.status.readyReplicas}' 2>/dev/null)\" = \"1\" ]"
+  },
+  {
+    "id": "s10",
+    "level": "hard",
+    "domain": "Services & Networking",
+    "title": "NetworkPolicy default-deny",
+    "namespace": "scenario10",
+    "verify": "kubectl run npcheck --rm -i --restart=Never --image=busybox:1.36 -n scenario10 --timeout=40s -- wget -qO- --timeout=5 backend-svc.scenario10.svc.cluster.local >/dev/null 2>&1"
+  },
+  {
+    "id": "s11",
+    "level": "hard",
+    "domain": "Services & Networking",
+    "title": "CoreDNS down",
+    "namespace": "scenario11",
+    "verify": "[ \"$(kubectl get deployment coredns -n kube-system -o jsonpath='{.status.readyReplicas}' 2>/dev/null)\" -ge 1 ] 2>/dev/null && kubectl exec -n scenario11 dns-test -- nslookup kubernetes.default >/dev/null 2>&1"
+  },
+  {
+    "id": "s12",
+    "level": "medium",
+    "domain": "Cluster Architecture, Installation & Configuration",
+    "title": "ResourceQuota blocking pods",
+    "namespace": "scenario12",
+    "verify": "[ \"$(kubectl get deployment newapp -n scenario12 -o jsonpath='{.status.readyReplicas}' 2>/dev/null)\" = \"2\" ]"
+  },
+  {
+    "id": "s13",
+    "level": "medium",
+    "domain": "Workloads & Scheduling",
+    "title": "Bad livenessProbe",
+    "namespace": "scenario13",
+    "verify": "[ \"$(kubectl get deployment web2 -n scenario13 -o jsonpath='{.status.readyReplicas}' 2>/dev/null)\" = \"1\" ] && [ \"$(kubectl get pods -n scenario13 -l app=web2 -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}' 2>/dev/null)\" -le 3 ] 2>/dev/null"
+  },
+  {
+    "id": "s14",
+    "level": "hard",
+    "domain": "Cluster Architecture, Installation & Configuration",
+    "title": "Node kubeconfig broken",
+    "namespace": null,
+    "verify": "docker exec cka-practice-control-plane kubectl --kubeconfig /etc/kubernetes/admin.conf get nodes >/dev/null 2>&1"
+  },
+  {
+    "id": "s15",
+    "level": "medium",
+    "domain": "Services & Networking",
+    "title": "Service targetPort mismatch",
+    "namespace": "scenario15",
+    "verify": "kubectl run svccheck --rm -i --restart=Never --image=busybox:1.36 -n scenario15 --timeout=40s -- wget -qO- --timeout=5 portapp-svc.scenario15.svc.cluster.local >/dev/null 2>&1"
+  },
+  {
+    "id": "s16",
+    "level": "easy",
+    "domain": "Workloads & Scheduling",
+    "title": "Missing ConfigMap reference",
+    "namespace": "scenario16",
+    "verify": "[ \"$(kubectl get deployment cfgapp -n scenario16 -o jsonpath='{.status.readyReplicas}' 2>/dev/null)\" = \"1\" ]"
+  },
+  {
+    "id": "s17",
+    "level": "medium",
+    "domain": "Workloads & Scheduling",
+    "title": "Job backoffLimit exhausted",
+    "namespace": "scenario17",
+    "verify": "[ \"$(kubectl get job batchjob -n scenario17 -o jsonpath='{.status.succeeded}' 2>/dev/null)\" = \"1\" ]"
+  },
+  {
+    "id": "s18",
+    "level": "easy",
+    "domain": "Workloads & Scheduling",
+    "title": "Missing Secret key reference",
+    "namespace": "scenario18",
+    "verify": "[ \"$(kubectl get deployment secretapp -n scenario18 -o jsonpath='{.status.readyReplicas}' 2>/dev/null)\" = \"1\" ]"
+  },
+  {
+    "id": "s19",
+    "level": "medium",
+    "domain": "Workloads & Scheduling",
+    "title": "Toleration value mismatch",
+    "namespace": "scenario19",
+    "verify": "[ \"$(kubectl get pod toleration-pod -n scenario19 -o jsonpath='{.status.phase}' 2>/dev/null)\" = \"Running\" ]"
+  },
+  {
+    "id": "s20",
+    "level": "medium",
+    "domain": "Workloads & Scheduling",
+    "title": "readOnlyRootFilesystem blocks app",
+    "namespace": "scenario20",
+    "verify": "[ \"$(kubectl get deployment roapp -n scenario20 -o jsonpath='{.status.readyReplicas}' 2>/dev/null)\" = \"1\" ]"
+  },
+  {
+    "id": "s21",
+    "level": "hard",
+    "domain": "Cluster Architecture, Installation & Configuration",
+    "title": "PodDisruptionBudget blocks drain",
+    "namespace": "scenario21",
+    "verify": "[ \"$(kubectl get pdb pdbapp-pdb -n scenario21 -o jsonpath='{.status.disruptionsAllowed}' 2>/dev/null)\" -ge 1 ] 2>/dev/null"
+  },
+  {
+    "id": "s22",
+    "level": "medium",
+    "domain": "Services & Networking",
+    "title": "readinessProbe wrong port",
+    "namespace": "scenario22",
+    "verify": "kubectl get endpointslice -n scenario22 -l kubernetes.io/service-name=readyapp-svc -o jsonpath='{.items[*].endpoints[*].addresses[*]}' 2>/dev/null | grep -q ."
+  },
+  {
+    "id": "s23",
+    "level": "hard",
+    "domain": "Cluster Architecture, Installation & Configuration",
+    "title": "kubelet cert path broken",
+    "namespace": null,
+    "verify": "[ \"$(kubectl get node cka-practice-worker2 -o jsonpath='{.status.conditions[?(@.type==\\\"Ready\\\")].status}' 2>/dev/null)\" = \"True\" ] && ! docker exec cka-practice-worker2 grep -q MISSING /etc/kubernetes/kubelet.conf"
+  },
+  {
+    "id": "s24",
+    "level": "medium",
+    "domain": "Storage",
+    "title": "PVC accessMode mismatch",
+    "namespace": "scenario24",
+    "verify": "[ \"$(kubectl get pvc shared-claim -n scenario24 -o jsonpath='{.status.phase}' 2>/dev/null)\" = \"Bound\" ]"
+  },
+  {
+    "id": "s25",
+    "level": "easy",
+    "domain": "Storage",
+    "title": "PVC requests more than PV capacity",
+    "namespace": "scenario25",
+    "verify": "[ \"$(kubectl get pvc big-claim -n scenario25 -o jsonpath='{.status.phase}' 2>/dev/null)\" = \"Bound\" ]"
+  },
+  {
+    "id": "s26",
+    "level": "hard",
+    "domain": "Storage",
+    "title": "ConfigMap subPath typo",
+    "namespace": "scenario26",
+    "verify": "kubectl exec -n scenario26 deploy/siteapp -- cat /usr/share/nginx/html/index.html 2>/dev/null | grep -q 'cka practice'"
+  },
+  {
+    "id": "s27",
+    "level": "hard",
+    "domain": "Services & Networking",
+    "title": "NetworkPolicy egress blocks DNS",
+    "namespace": "scenario27",
+    "verify": "kubectl exec -n scenario27 dnsclient -- nslookup kubernetes.default >/dev/null 2>&1"
+  },
+  {
+    "id": "s28",
+    "level": "medium",
+    "domain": "Services & Networking",
+    "title": "Headless Service has no ClusterIP",
+    "namespace": "scenario28",
+    "verify": "ip=$(kubectl get svc headless-svc -n scenario28 -o jsonpath='{.spec.clusterIP}' 2>/dev/null); [ -n \"$ip\" ] && [ \"$ip\" != \"None\" ]"
+  },
+  {
+    "id": "s29",
+    "level": "medium",
+    "domain": "Cluster Architecture, Installation & Configuration",
+    "title": "ServiceAccount token not mounted",
+    "namespace": "scenario29",
+    "verify": "kubectl exec -n scenario29 api-pod -- cat /var/run/secrets/kubernetes.io/serviceaccount/token >/dev/null 2>&1"
+  },
+  {
+    "id": "s30",
+    "level": "hard",
+    "domain": "Cluster Architecture, Installation & Configuration",
+    "title": "LimitRange defaults exceed quota",
+    "namespace": "scenario30",
+    "verify": "[ \"$(kubectl get deployment limitedapp -n scenario30 -o jsonpath='{.status.readyReplicas}' 2>/dev/null)\" = \"1\" ]"
+  },
+  {
+    "id": "s31",
+    "level": "easy",
+    "domain": "Cluster Architecture, Installation & Configuration",
+    "title": "All worker nodes cordoned",
+    "namespace": "scenario31",
+    "verify": "[ \"$(kubectl get deployment waiting-app -n scenario31 -o jsonpath='{.status.readyReplicas}' 2>/dev/null)\" = \"2\" ]"
+  },
+  {
+    "id": "s32",
+    "level": "easy",
+    "domain": "Workloads & Scheduling",
+    "title": "nodeSelector label does not exist",
+    "namespace": "scenario32",
+    "verify": "[ \"$(kubectl get deployment picky-app -n scenario32 -o jsonpath='{.status.readyReplicas}' 2>/dev/null)\" = \"1\" ]"
+  },
+  {
+    "id": "s33",
+    "level": "hard",
+    "domain": "Storage",
+    "title": "StatefulSet volumeClaimTemplate bad StorageClass",
+    "namespace": "scenario33",
+    "verify": "[ \"$(kubectl get statefulset statefuldb -n scenario33 -o jsonpath='{.status.readyReplicas}' 2>/dev/null)\" = \"1\" ]"
+  },
+  {
+    "id": "s34",
+    "level": "hard",
+    "domain": "Cluster Architecture, Installation & Configuration",
+    "title": "apiserver serving cert missing",
+    "namespace": null,
+    "verify": "docker exec cka-practice-control-plane test -f /etc/kubernetes/pki/apiserver.crt && docker exec cka-practice-control-plane test -f /etc/kubernetes/pki/apiserver.key && docker exec cka-practice-control-plane openssl x509 -noout -checkend 3600 -in /etc/kubernetes/pki/apiserver.crt >/dev/null 2>&1 && kubectl get nodes >/dev/null 2>&1"
+  }
+]
