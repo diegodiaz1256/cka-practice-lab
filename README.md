@@ -219,6 +219,37 @@ Progress lives in `progress.json` (gitignored). `./cka reset-progress` clears it
 
 ---
 
+## License and attribution
+
+MIT — see [LICENSE](LICENSE). Use it, fork it, change it.
+
+The exercises here are original. They were written against the published CKA curriculum
+and the upstream Kubernetes documentation; no question text, answer key or scenario was
+copied from any commercial course, practice exam or simulator.
+
+The tooling downloads from official upstream sources only:
+
+| Component | Project | License |
+|---|---|---|
+| kind | [kubernetes-sigs/kind](https://github.com/kubernetes-sigs/kind) | Apache 2.0 |
+| kubectl | [kubernetes/kubernetes](https://github.com/kubernetes/kubernetes) | Apache 2.0 |
+| Gateway API CRDs | [kubernetes-sigs/gateway-api](https://github.com/kubernetes-sigs/gateway-api) | Apache 2.0 |
+| etcdctl / etcdutl | [etcd-io/etcd](https://github.com/etcd-io/etcd) | Apache 2.0 |
+| gum | [charmbracelet/gum](https://github.com/charmbracelet/gum) | MIT |
+| fzf | [junegunn/fzf](https://github.com/junegunn/fzf) | MIT |
+
+None of these are redistributed here; `start.sh` fetches them at run time, and the
+container images used by the exercises (`nginx`, `busybox`, `redis`, `registry.k8s.io`
+images) are pulled from their own registries under their own terms.
+
+> This project is not affiliated with, endorsed by, or sponsored by the Cloud Native
+> Computing Foundation or The Linux Foundation. "CKA" and "Certified Kubernetes
+> Administrator" are trademarks of The Linux Foundation, referenced here only to describe
+> what the exercises prepare for. Passing these exercises guarantees nothing about the
+> real exam.
+
+---
+
 ## Layout
 
 ```

@@ -1,6 +1,6 @@
 # Troubleshooting Exercises
 
-killer.sh-style "find and fix" scenarios. Each breaks something real on the
+"Find and fix" scenarios. Each breaks something real on the
 `cka-practice` cluster. Break scripts only tell you *what namespace/node was touched*,
 never *what's actually wrong* — same as the real exam, you diagnose from symptoms.
 Don't peek at the answer or the `-break.sh` source until you're done or truly stuck.
