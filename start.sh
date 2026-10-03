@@ -4,6 +4,8 @@ set -euo pipefail
 DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 # shellcheck source=lib/config.sh
 . "$DIR/lib/config.sh"
+# shellcheck source=lib/cluster.sh
+. "$DIR/lib/cluster.sh"
 
 need() {
   command -v "$1" >/dev/null 2>&1 || { echo "Missing '$1'. See README for install steps." >&2; exit 1; }
@@ -35,7 +37,11 @@ if [ -r /proc/sys/fs/user/max_inotify_instances ] || [ -r /proc/sys/fs/inotify/m
 fi
 
 if kind get clusters 2>/dev/null | grep -qx "$CLUSTER_NAME"; then
-  echo "Cluster '$CLUSTER_NAME' already exists."
+  if [ -n "$(cka_stopped_nodes)" ]; then
+    cka_resume
+  else
+    echo "Cluster '$CLUSTER_NAME' already exists."
+  fi
 else
   echo "Creating cluster '$CLUSTER_NAME' ($NODE_IMAGE)..."
   bash "$DIR/lib/render-kind-config.sh" > "$DIR/.kind-config.generated.yaml"

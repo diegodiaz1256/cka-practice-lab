@@ -195,14 +195,28 @@ ship fixed binaries, so replacing them differs from `apt`/`yum` on the real exam
 
 ## Cluster lifecycle
 
+The cluster is a set of Docker containers (the kind nodes). These commands decide whether
+they are running:
+
 ```bash
-./start.sh     # create if missing, wait for Ready, refresh kubeconfig
-./stop.sh      # delete the cluster entirely
-./cka stop     # just clean up after an exercise (keeps the cluster)
+./start.sh            # create the cluster if missing, resume it if paused
+./stop.sh             # PAUSE: power the nodes off, keep the cluster and all its state
+./stop.sh --delete    # DELETE: remove the cluster and its nodes entirely
 ```
 
-`./cka stop` restores everything an exercise touched: namespaces, node taints and labels,
-cordons, CoreDNS replicas, control-plane manifests and certificates. Safe to run anytime.
+Paused nodes use no CPU or memory. `./start.sh` brings the cluster back exactly as you
+left it - your namespaces, an exercise in progress, everything. The same is available
+from the manager as `./cka pause` and `./cka resume`, and as "Power the cluster off" in
+the `./cka -i` menu.
+
+Don't confuse these with `./cka stop`, which only finishes an *exercise* - it restores
+everything the exercise touched (namespaces, node taints and labels, cordons, CoreDNS
+replicas, control-plane manifests and certificates) and leaves the cluster running. Safe
+to run anytime.
+
+Resuming takes a minute or so while the nodes come back up. Node IPs may change across a
+pause; Kubernetes follows them, so you don't need to do anything. Pausing is refused
+while a mock exam is running, since its clock would keep ticking.
 
 Progress lives in `progress.json` (gitignored). `./cka reset-progress` clears it.
 
@@ -257,7 +271,7 @@ cka                    exercise manager
 cka.conf               configuration (copy to cka.conf.local to override)
 start.sh / stop.sh     cluster lifecycle
 upgrade-lab.sh         separate cluster for kubeadm upgrade practice
-lib/                   config loader, kind config generator, menu helpers
+lib/                   config loader, kind config generator, pause/resume, menu helpers
 scenarios/             break-and-fix: metadata, fault injectors, answer keys, reset
 tasks/                 build exercises: metadata and pre-seeded resources
 ```

@@ -30,9 +30,12 @@ Usage: cka <command> [args]
   list [all|scenarios|tasks] [reveal]
                                  List exercises and what you've solved.
                                  Add 'reveal' to un-hide scenario titles (spoilers).
-  start <s01..s33|t01..t47>      Begin an exercise
+  start <s01..s34|t01..t55>      Begin an exercise
   check [id]                     Grade it (defaults to the one you're working on)
-  stop                           Finish up: clean the cluster, pick another
+  stop                           Finish the current exercise and restore a clean cluster
+                                 (the cluster keeps running - see pause)
+  pause                          Power the cluster OFF: stops the kind nodes, keeps all state
+  resume                         Power it back on (same as ./start.sh)
   status                         Progress by exam topic
   exam start|next|status|finish|abort
                                  Timed mock exam: 16-20 tasks, 2h, 66% to pass
@@ -607,6 +610,7 @@ EOF
         "exam|MOCK EXAM      - 16-20 tasks, 2h clock, graded at the end" \
         "list|Browse all questions and what I've solved" \
         "status|My progress, split by exam topic" \
+        "pause|Power the cluster off (stops the nodes, keeps everything)" \
         "wipe|Erase my progress and start over" \
         "quit|Quit") || { ui_dim "Bye."; break; }
     else
@@ -667,12 +671,26 @@ EOF
       stop)     stop_cmd ;;
       list)     list_cmd all ;;
       status)   status_cmd ;;
+      pause)    pause_cmd && ui_dim "Bring it back with: cka resume" || true ;;
       wipe)     if ui_confirm "Erase all recorded progress?"; then reset_progress_cmd; else ui_dim "Cancelled."; fi ;;
       quit)     ui_dim "Bye."; break ;;
       *)        ui_err "Unknown choice." ;;
     esac
   done
 }
+
+# Power the kind nodes off without deleting anything. Distinct from 'stop', which only
+# cleans up an exercise and leaves the cluster running.
+pause_cmd() {
+  if [ -f "$EXAM" ] && [ "$(jqe '.finished' 2>/dev/null)" = "false" ]; then
+    ui_err "A mock exam is running and its clock keeps ticking while paused."
+    ui_dim "Run 'cka exam abort' first, or pause anyway with: ./stop.sh"
+    return 1
+  fi
+  bash "$DIR/stop.sh"
+}
+
+resume_cmd() { bash "$DIR/start.sh"; }
 
 cmd="${1:-}"
 shift || true
@@ -684,7 +702,10 @@ case "$cmd" in
   check) check_cmd "${1:-}" || exit 1 ;;
   pass) pass_cmd "${1:?id required}" ;;
   fail) fail_cmd "${1:?id required}" ;;
-  stop) stop_cmd ;;
+  stop) stop_cmd
+        ui_dim "The cluster is still running. To power the nodes off: cka pause" ;;
+  pause) pause_cmd ;;
+  resume) resume_cmd ;;
   status) status_cmd ;;
   reset-progress) reset_progress_cmd ;;
   *) usage; exit 1 ;;
